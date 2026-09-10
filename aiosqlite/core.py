@@ -60,18 +60,22 @@ def _connection_worker_thread(tx: _TxQueue):
 
         try:
             LOG.debug("executing %s", function)
-            result = function()
+            try:
+                result = function()
+                LOG.debug("operation %s completed", function)
+            finally:
+                # Do not retain a connection while the worker waits for its next item.
+                del function
 
-            if future:
+            if future and not future.get_loop().is_closed():
                 future.get_loop().call_soon_threadsafe(set_result, future, result)
-            LOG.debug("operation %s completed", function)
 
             if result is _STOP_RUNNING_SENTINEL:
                 break
 
         except BaseException as e:  # noqa B036
             LOG.debug("returning exception %s", e)
-            if future:
+            if future and not future.get_loop().is_closed():
                 future.get_loop().call_soon_threadsafe(set_exception, future, e)
 
 
@@ -163,12 +167,16 @@ class Connection:
         """Connect to the actual sqlite database."""
         if self._connection is None:
             try:
+
+                def connector():
+                    # Keep ownership on the worker even if the awaiting task is cancelled.
+                    self._connection = self._connector()
+
                 future = asyncio.get_event_loop().create_future()
-                self._tx.put_nowait((future, self._connector))
-                self._connection = await future
+                self._tx.put_nowait((future, connector))
+                await future
             except BaseException:
                 self.stop()
-                self._connection = None
                 raise
 
         return self

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from sqlite3 import OperationalError
 from tempfile import TemporaryDirectory
-from threading import Thread
+from threading import Event, Thread
 from unittest import IsolatedAsyncioTestCase, SkipTest
 from unittest.mock import patch
 
@@ -406,6 +406,101 @@ class SmokeTest(IsolatedAsyncioTestCase):
         if connection._running:
             connection.stop()
             raise AssertionError("connection thread was not stopped")
+
+    async def test_cancelled_connect_closes_native_connection(self):
+        for stage in ("connecting", "handoff"):
+            with self.subTest(stage=stage):
+                await self._check_cancelled_connect(stage)
+
+    async def _check_cancelled_connect(self, stage):
+        loop = asyncio.get_running_loop()
+        started = asyncio.Event()
+        release = Event()
+        native_connections = []
+
+        def factory(*args, **kwargs):
+            if stage == "connecting":
+                loop.call_soon_threadsafe(started.set)
+                if not release.wait(5):
+                    raise TimeoutError("connector was not released")
+            native = sqlite3.Connection(*args, **kwargs)
+            native_connections.append(native)
+            if stage == "handoff":
+                # Cancel before the worker delivers the successful result.
+                loop.call_soon_threadsafe(task.cancel)
+            return native
+
+        connection = aiosqlite.connect(
+            self.db, factory=factory, check_same_thread=False
+        )
+
+        async def open_connection():
+            async with connection:
+                self.fail("cancelled connection entered its context")
+
+        task = asyncio.create_task(open_connection())
+        try:
+            if stage == "connecting":
+                await asyncio.wait_for(started.wait(), 5)
+                task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+            release.set()
+            await asyncio.to_thread(connection._thread.join, 5)
+            self.assertFalse(connection._thread.is_alive())
+            self.assertEqual(len(native_connections), 1)
+            with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed"):
+                native_connections[0].execute("SELECT 1")
+        finally:
+            release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await asyncio.to_thread(connection._thread.join, 5)
+            for native in native_connections:
+                native.close()
+
+    def test_cancelled_connect_after_event_loop_closed(self):
+        loop = asyncio.new_event_loop()
+        started = asyncio.Event()
+        release = Event()
+        native_connections = []
+
+        def factory(*args, **kwargs):
+            loop.call_soon_threadsafe(started.set)
+            if not release.wait(5):
+                raise TimeoutError("connector was not released")
+            native = sqlite3.Connection(*args, **kwargs)
+            native_connections.append(native)
+            return native
+
+        connection = aiosqlite.connect(
+            self.db, factory=factory, check_same_thread=False
+        )
+
+        async def cancel_connection():
+            task = asyncio.ensure_future(connection)
+            await asyncio.wait_for(started.wait(), 5)
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        with patch("threading.excepthook") as thread_error:
+            try:
+                loop.run_until_complete(cancel_connection())
+                loop.close()
+                release.set()
+                connection._thread.join(5)
+                self.assertFalse(connection._thread.is_alive())
+                self.assertEqual(len(native_connections), 1)
+                with self.assertRaisesRegex(sqlite3.ProgrammingError, "closed"):
+                    native_connections[0].execute("SELECT 1")
+                thread_error.assert_not_called()
+            finally:
+                release.set()
+                connection._thread.join(5)
+                loop.close()
+                for native in native_connections:
+                    native.close()
 
     async def test_iterdump(self):
         async with aiosqlite.connect(":memory:") as db:

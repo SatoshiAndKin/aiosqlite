@@ -80,6 +80,9 @@ execution thread, and provide context managers to handle automatically closing
 connections.  Cursors are similarly proxies to the real cursors, and provide
 async iterators to query results.
 
+If opening a connection is cancelled, its worker closes the underlying database
+connection before stopping, even if the awaiting event loop has already closed.
+
 
 License
 -------
