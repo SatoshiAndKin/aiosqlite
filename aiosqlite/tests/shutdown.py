@@ -3,6 +3,7 @@
 
 import asyncio
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
@@ -89,7 +90,7 @@ class QueueShutdownTest(TestCase):
                     self.assertFalse(connection._thread.is_alive())
                     self.assertIsNone(connection._connection)
                     thread_error.assert_not_called()
-                    with sqlite3.connect(path) as reader:
+                    with closing(sqlite3.connect(path)) as reader:
                         rows = reader.execute(
                             "SELECT value FROM writes ORDER BY value"
                         ).fetchall()
