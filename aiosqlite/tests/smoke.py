@@ -46,7 +46,7 @@ class SmokeTest(IsolatedAsyncioTestCase):
             with self.subTest(fail=fail):
                 async with aiosqlite.connect(self.db) as db:
 
-                    def operation():
+                    def operation(fail=fail):
                         value = Payload()
                         references.append(weakref.ref(value))
                         if fail:
@@ -62,6 +62,7 @@ class SmokeTest(IsolatedAsyncioTestCase):
                             self.fail("operation did not raise its error")
                     else:
                         result = await db._execute(operation)
+                        self.assertIs(result, references[-1]())
                         del result
                     await asyncio.sleep(0)
                     gc.collect()
