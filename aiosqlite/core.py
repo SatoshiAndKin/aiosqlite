@@ -71,6 +71,7 @@ def _connection_worker_thread(tx: _TxQueue):
         # futures)
 
         future, function = tx.get()
+        result = None
 
         try:
             LOG.debug("executing %s", function)
@@ -91,6 +92,10 @@ def _connection_worker_thread(tx: _TxQueue):
             LOG.debug("returning exception %s", e)
             if future:
                 _notify_future(future, set_exception, e)
+        finally:
+            # Delivery owns the outcome until its loop consumes it. An idle
+            # worker must not retain the previous result or exception traceback.
+            del future, result
 
 
 class Connection:

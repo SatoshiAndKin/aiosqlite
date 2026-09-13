@@ -87,6 +87,9 @@ closes during result delivery. Normal transaction commit and rollback rules
 still apply. Prefer awaiting ``close()`` before closing the event loop so callers
 can receive all outcomes.
 
+After delivery, an idle worker releases its reference to the completed result
+or exception. Callers retain ownership of the outcomes they receive.
+
 
 License
 -------
