@@ -23,7 +23,7 @@ venv: .venv
 test:
 	python -m coverage run -m $(PKG).tests
 	python -m coverage report
-	python -m mypy -p $(PKG)
+	python -m mypy
 
 lint:
 	python -m flake8 $(PKG)

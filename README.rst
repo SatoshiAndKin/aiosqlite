@@ -80,6 +80,16 @@ execution thread, and provide context managers to handle automatically closing
 connections.  Cursors are similarly proxies to the real cursors, and provide
 async iterators to query results.
 
+If opening a connection is cancelled, its worker closes the underlying database
+connection before stopping, even if the awaiting event loop has already closed.
+The worker executes queued SQL and closes the connection even if the event loop
+closes during result delivery. Normal transaction commit and rollback rules
+still apply. Prefer awaiting ``close()`` before closing the event loop so callers
+can receive all outcomes.
+
+After delivery, an idle worker releases its reference to the completed result
+or exception. Callers retain ownership of the outcomes they receive.
+
 
 License
 -------

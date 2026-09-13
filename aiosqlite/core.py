@@ -41,6 +41,20 @@ def set_exception(fut: asyncio.Future, e: BaseException) -> None:
         fut.set_exception(e)
 
 
+def _notify_future(
+    future: asyncio.Future, callback: Callable[[asyncio.Future, Any], None], value: Any
+) -> None:
+    """Deliver an outcome only while its event loop can still receive it."""
+    loop = future.get_loop()
+    try:
+        loop.call_soon_threadsafe(callback, future, value)
+    except RuntimeError:
+        # Loop closure can race with worker completion. It must not prevent
+        # later queued SQL or the stop sentinel from being processed.
+        if not loop.is_closed():
+            raise
+
+
 _STOP_RUNNING_SENTINEL = object()
 _TxQueue = SimpleQueue[tuple[Optional[asyncio.Future], Callable[[], Any]]]
 
@@ -57,14 +71,19 @@ def _connection_worker_thread(tx: _TxQueue):
         # futures)
 
         future, function = tx.get()
+        result = None
 
         try:
             LOG.debug("executing %s", function)
-            result = function()
+            try:
+                result = function()
+                LOG.debug("operation %s completed", function)
+            finally:
+                # Do not retain a connection while the worker waits for its next item.
+                del function
 
             if future:
-                future.get_loop().call_soon_threadsafe(set_result, future, result)
-            LOG.debug("operation %s completed", function)
+                _notify_future(future, set_result, result)
 
             if result is _STOP_RUNNING_SENTINEL:
                 break
@@ -72,7 +91,11 @@ def _connection_worker_thread(tx: _TxQueue):
         except BaseException as e:  # noqa B036
             LOG.debug("returning exception %s", e)
             if future:
-                future.get_loop().call_soon_threadsafe(set_exception, future, e)
+                _notify_future(future, set_exception, e)
+        finally:
+            # Delivery owns the outcome until its loop consumes it. An idle
+            # worker must not retain the previous result or exception traceback.
+            del future, result
 
 
 class Connection:
@@ -163,12 +186,16 @@ class Connection:
         """Connect to the actual sqlite database."""
         if self._connection is None:
             try:
+
+                def connector():
+                    # Keep ownership on the worker even if the awaiting task is cancelled.
+                    self._connection = self._connector()
+
                 future = asyncio.get_event_loop().create_future()
-                self._tx.put_nowait((future, self._connector))
-                self._connection = await future
+                self._tx.put_nowait((future, connector))
+                await future
             except BaseException:
                 self.stop()
-                self._connection = None
                 raise
 
         return self
