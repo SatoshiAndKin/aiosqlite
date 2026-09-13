@@ -5,7 +5,17 @@ on:
       - main
     tags:
       - v*
+    paths-ignore:
+      - docs/**
+      - '*.md'
+      - '*.rst'
+      - LICENSE
   pull_request:
+    paths-ignore:
+      - docs/**
+      - '*.md'
+      - '*.rst'
+      - LICENSE
 
 permissions:
   contents: read

@@ -82,6 +82,10 @@ async iterators to query results.
 
 If opening a connection is cancelled, its worker closes the underlying database
 connection before stopping, even if the awaiting event loop has already closed.
+The worker executes queued SQL and closes the connection even if the event loop
+closes during result delivery. Normal transaction commit and rollback rules
+still apply. Prefer awaiting ``close()`` before closing the event loop so callers
+can receive all outcomes.
 
 
 License

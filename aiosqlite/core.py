@@ -41,6 +41,20 @@ def set_exception(fut: asyncio.Future, e: BaseException) -> None:
         fut.set_exception(e)
 
 
+def _notify_future(
+    future: asyncio.Future, callback: Callable[[asyncio.Future, Any], None], value: Any
+) -> None:
+    """Deliver an outcome only while its event loop can still receive it."""
+    loop = future.get_loop()
+    try:
+        loop.call_soon_threadsafe(callback, future, value)
+    except RuntimeError:
+        # Loop closure can race with worker completion. It must not prevent
+        # later queued SQL or the stop sentinel from being processed.
+        if not loop.is_closed():
+            raise
+
+
 _STOP_RUNNING_SENTINEL = object()
 _TxQueue = SimpleQueue[tuple[Optional[asyncio.Future], Callable[[], Any]]]
 
@@ -67,16 +81,16 @@ def _connection_worker_thread(tx: _TxQueue):
                 # Do not retain a connection while the worker waits for its next item.
                 del function
 
-            if future and not future.get_loop().is_closed():
-                future.get_loop().call_soon_threadsafe(set_result, future, result)
+            if future:
+                _notify_future(future, set_result, result)
 
             if result is _STOP_RUNNING_SENTINEL:
                 break
 
         except BaseException as e:  # noqa B036
             LOG.debug("returning exception %s", e)
-            if future and not future.get_loop().is_closed():
-                future.get_loop().call_soon_threadsafe(set_exception, future, e)
+            if future:
+                _notify_future(future, set_exception, e)
 
 
 class Connection:
