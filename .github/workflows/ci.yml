@@ -68,6 +68,19 @@ jobs:
           name: sdist
           path: dist
 
+  required-ci:
+    name: Required CI
+    if: ${{ always() }}
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require the test matrix and package build
+        env:
+          TEST_RESULT: ${{ needs.test.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: test "$TEST_RESULT" = success && test "$BUILD_RESULT" = success
+
   publish:
     needs: build
     runs-on: ubuntu-latest
