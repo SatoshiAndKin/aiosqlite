@@ -7,6 +7,10 @@ on:
       - v*
   pull_request:
 
+concurrency:
+  group: pr-ci-ci.yml-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
