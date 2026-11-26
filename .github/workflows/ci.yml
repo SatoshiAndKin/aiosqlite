@@ -5,7 +5,17 @@ on:
       - main
     tags:
       - v*
+    paths-ignore:
+      - docs/**
+      - '*.md'
+      - '*.rst'
+      - LICENSE
   pull_request:
+    paths-ignore:
+      - docs/**
+      - '*.md'
+      - '*.rst'
+      - LICENSE
 
 concurrency:
   group: pr-ci-ci.yml-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
