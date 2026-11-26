@@ -70,7 +70,7 @@ jobs:
 
   required-ci:
     name: Required CI
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     needs: [test, build]
     runs-on: ubuntu-latest
     timeout-minutes: 2
